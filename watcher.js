@@ -1,46 +1,55 @@
-// watcher.js
-const {Web3} = require('web3');
-const axios = require('axios');
-require('dotenv').config(); // Load environment variables from .env file
+const ethers = require('ethers');
+const fetch = require('node-fetch');
+require('dotenv').config();
 
-// Replace with your Infura project ID or other Ethereum node provider
-const web3 = new Web3(new Web3.providers.HttpProvider(`https://mainnet.infura.io/v3/${process.env.INFURA_PROJECT_ID}`));
+// Load environment variables
+const {
+    INFURA_PROJECT_ID,
+    CONTRACT_ADDRESS,
+    TELEGRAM_BOT_TOKEN,
+    TELEGRAM_CHAT_ID
+} = process.env;
 
-// Replace with your contract ABI and address
-const contractABI = JSON.parse(process.env.CONTRACT_ABI);
-const contractAddress = process.env.CONTRACT_ADDRESS;
+// Define your provider (you can use Infura, Alchemy, or any Ethereum node provider)
+const provider = new ethers.providers.InfuraProvider('mainnet', INFURA_PROJECT_ID);
 
-// Replace with your Telegram bot token and chat ID
-const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
-const telegramChatId = process.env.TELEGRAM_CHAT_ID;
+// Define the contract ABI
+const contractABI = [
+    // Replace with your contract ABI
+];
 
-const contract = new web3.eth.Contract(contractABI, contractAddress);
+// Create a contract instance
+const contract = new ethers.Contract(CONTRACT_ADDRESS, contractABI, provider);
 
-// Replace with the event you want to watch
-const eventName = process.env.EVENT_NAME;
-
-contract.events[eventName]({
-    fromBlock: 'latest'
-}, (error, event) => {
-    if (error) {
-        console.error('Error watching event:', error);
-        return;
-    }
-
-    console.log('Event received:', event);
-
-    // Format the message
-    const message = `Event ${eventName} received:\n${JSON.stringify(event.returnValues, null, 2)}`;
-
-    // Send message to Telegram
-    axios.post(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
-        chat_id: telegramChatId,
-        text: message
-    })
-    .then(response => {
-        console.log('Message sent to Telegram:', response.data);
-    })
-    .catch(error => {
-        console.error('Error sending message to Telegram:', error);
+// Function to send message to Telegram
+const sendTelegramMessage = async (message) => {
+    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            chat_id: TELEGRAM_CHAT_ID,
+            text: message,
+        }),
     });
-});
+    const data = await response.json();
+    if (!data.ok) {
+        console.error('Error sending message to Telegram:', data);
+    } else {
+        console.log('Message sent to Telegram successfully');
+    }
+};
+
+// Define the function to handle the events
+const handleEvent = async (event) => {
+    console.log('New event:', event);
+    const message = `New event detected: ${JSON.stringify(event)}`;
+    await sendTelegramMessage(message);
+};
+
+// Set up the event listener for all events
+contract.on('*', handleEvent);
+
+console.log(`Listening for all events from contract ${CONTRACT_ADDRESS}...`);
