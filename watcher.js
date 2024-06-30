@@ -1,55 +1,75 @@
-const ethers = require('ethers');
-const fetch = require('node-fetch');
-require('dotenv').config();
+const Web3 = require('web3');
+const axios = require('axios');
+const http = require('http');
+require('dotenv').config(); // Load environment variables from .env file
 
-// Load environment variables
-const {
-    INFURA_PROJECT_ID,
-    CONTRACT_ADDRESS,
-    TELEGRAM_BOT_TOKEN,
-    TELEGRAM_CHAT_ID
-} = process.env;
+// Initialize Web3 with Infura
+const web3 = new Web3(new Web3.providers.HttpProvider(`https://mainnet.infura.io/v3/${process.env.INFURA_PROJECT_ID}`));
 
-// Define your provider (you can use Infura, Alchemy, or any Ethereum node provider)
-const provider = new ethers.providers.InfuraProvider('mainnet', INFURA_PROJECT_ID);
+// Telegram bot details
+const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN;
+const telegramChatId = process.env.TELEGRAM_CHAT_ID;
 
-// Define the contract ABI
-const contractABI = [
-    // Replace with your contract ABI
-];
+// Address to watch
+const watchAddress = process.env.WATCH_ADDRESS.toLowerCase();
 
-// Create a contract instance
-const contract = new ethers.Contract(CONTRACT_ADDRESS, contractABI, provider);
+// Port to listen on
+const port = process.env.PORT || 3000;
 
-// Function to send message to Telegram
-const sendTelegramMessage = async (message) => {
-    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            chat_id: TELEGRAM_CHAT_ID,
-            text: message,
-        }),
-    });
-    const data = await response.json();
-    if (!data.ok) {
-        console.error('Error sending message to Telegram:', data);
-    } else {
-        console.log('Message sent to Telegram successfully');
+// Subscribe to pending transactions
+web3.eth.subscribe('pendingTransactions', (error, txHash) => {
+    if (error) {
+        console.error('Error subscribing to pending transactions:', error);
+        return;
     }
-};
 
-// Define the function to handle the events
-const handleEvent = async (event) => {
-    console.log('New event:', event);
-    const message = `New event detected: ${JSON.stringify(event)}`;
-    await sendTelegramMessage(message);
-};
+    // Get transaction details
+    web3.eth.getTransaction(txHash)
+        .then(tx => {
+            if (tx && (tx.to && tx.to.toLowerCase() === watchAddress || tx.from && tx.from.toLowerCase() === watchAddress)) {
+                console.log('Transaction involving watch address:', tx);
 
-// Set up the event listener for all events
-contract.on('*', handleEvent);
+                // Get transaction receipt to calculate the fee
+                web3.eth.getTransactionReceipt(txHash)
+                    .then(receipt => {
+                        if (receipt) {
+                            const gasUsed = receipt.gasUsed;
+                            const gasPrice = tx.gasPrice;
+                            const fee = web3.utils.fromWei((gasUsed * gasPrice).toString(), 'ether');
 
-console.log(`Listening for all events from contract ${CONTRACT_ADDRESS}...`);
+                            // Format the message
+                            const message = `New transaction involving ${watchAddress}:\n${JSON.stringify(tx, null, 2)}\nTransaction Fee: ${fee} ETH`;
+
+                            // Send message to Telegram
+                            axios.post(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
+                                chat_id: telegramChatId,
+                                text: message
+                            })
+                            .then(response => {
+                                console.log('Message sent to Telegram:', response.data);
+                            })
+                            .catch(error => {
+                                console.error('Error sending message to Telegram:', error);
+                            });
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error getting transaction receipt:', error);
+                    });
+            }
+        })
+        .catch(error => {
+            console.error('Error getting transaction details:', error);
+        });
+});
+
+// Create an HTTP server
+const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Transaction watcher is running\n');
+});
+
+// Start the server
+server.listen(port, () => {
+    console.log(`Server is listening on port ${port}`);
+});
