@@ -1,4 +1,4 @@
-const Web3 = require('web3');
+const {Web3} = require('web3');
 const axios = require('axios');
 const http = require('http');
 require('dotenv').config(); // Load environment variables from .env file
